@@ -255,6 +255,26 @@ class NativeRootRepository(
                 },
             ),
             NativeRootMethodResult(
+                label = "permission boundary check",
+                summary = when {
+                    snapshot.permissionBoundaryDetected -> "Detected"
+                    !snapshot.permissionBoundaryAvailable -> "Unavailable"
+                    else -> "Clean"
+                },
+                outcome = when {
+                    snapshot.permissionBoundaryDetected -> NativeRootMethodOutcome.DETECTED
+                    !snapshot.permissionBoundaryAvailable -> NativeRootMethodOutcome.SUPPORT
+                    else -> NativeRootMethodOutcome.CLEAN
+                },
+                detail = buildString {
+                    append("Checks SELinux MAC and sandbox permission boundaries (Netlink RTM_GETLINK, /data_mirror).")
+                    append("\nUnder AOSP sepolicy, untrusted_app is strictly forbidden from querying RTM_GETLINK dump on API 30+.")
+                    append("\nIf RTM_GETLINK queries succeed without EACCES or /data_mirror exists, it indicates a permission boundary breach.")
+                    append("\nTest Result:\n")
+                    append(snapshot.permissionBoundaryDetail)
+                },
+            ),
+            NativeRootMethodResult(
                 label = "prctlProbe",
                 summary = when {
                     snapshot.prctlProbeHit && snapshot.kernelSuVersion > 0L -> "v${snapshot.kernelSuVersion}"

@@ -42,6 +42,9 @@ class NativeRootNativeBridgeTest {
                 DEVPTS_ABNORMAL_PERMISSION_CHECKED=2
                 DEVPTS_ABNORMAL_PERMISSION_DENIED=1
                 DEVPTS_ABNORMAL_PERMISSION_DETAIL=Test: /dev/pts/1\nOwner: 0\nSELinux: u:object_r:ksu_file:s0\nFound KernelSU file Domain
+                PERMISSION_BOUNDARY_FOUND=1
+                PERMISSION_BOUNDARY_AVAILABLE=1
+                PERMISSION_BOUNDARY_DETAIL=Netlink boundary: sendto(RTM_GETLINK) succeeded (SELinux bypass detected).\nMount boundary: /data_mirror directory is accessible.
                 KSU_SUPERCALL_ATTEMPTED=1
                 KSU_SUPERCALL_HIT=1
                 KSU_SUPERCALL_BLOCKED=0
@@ -81,6 +84,9 @@ class NativeRootNativeBridgeTest {
         assertEquals(2, snapshot.devptsAbnormalPermissionCheckedCount)
         assertEquals(1, snapshot.devptsAbnormalPermissionDeniedCount)
         assertTrue(snapshot.devptsAbnormalPermissionDetail.contains("Found KernelSU file Domain"))
+        assertTrue(snapshot.permissionBoundaryDetected)
+        assertTrue(snapshot.permissionBoundaryAvailable)
+        assertTrue(snapshot.permissionBoundaryDetail.contains("Netlink boundary"))
         assertTrue(snapshot.ksuSupercallAttempted)
         assertTrue(snapshot.ksuSupercallProbeHit)
         assertFalse(snapshot.ksuSupercallBlocked)
