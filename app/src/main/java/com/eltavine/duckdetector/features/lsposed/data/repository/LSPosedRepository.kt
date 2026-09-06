@@ -149,6 +149,8 @@ class LSPosedRepository(
             nativeMapsHitCount = nativeSnapshot.mapsHitCount,
             nativeHeapHitCount = nativeSnapshot.heapHitCount,
             nativeHeapScannedRegions = nativeSnapshot.heapScannedRegions,
+            nativeCgroupHitCount = nativeSnapshot.cgroupHitCount,
+            nativeCgroupScannedPids = nativeSnapshot.cgroupScannedPids,
         )
     }
 
@@ -316,7 +318,21 @@ class LSPosedRepository(
                 label = "Native library",
                 summary = if (nativeSnapshot.available) "Loaded" else "Unavailable",
                 outcome = if (nativeSnapshot.available) LSPosedMethodOutcome.CLEAN else LSPosedMethodOutcome.SUPPORT,
-                detail = "JNI-backed maps and heap probes for LSPosed-specific runtime evidence.",
+                detail = "JNI-backed maps, heap, and cgroup probes for LSPosed-specific runtime evidence.",
+            ),
+            LSPosedMethodResult(
+                label = "Cgroup trace anomaly",
+                summary = when {
+                    nativeSnapshot.cgroupHitCount > 0 -> "${nativeSnapshot.cgroupHitCount} anomaly(ies)"
+                    nativeSnapshot.available -> "Clean"
+                    else -> "Unavailable"
+                },
+                outcome = when {
+                    nativeSnapshot.cgroupHitCount > 0 -> LSPosedMethodOutcome.DETECTED
+                    nativeSnapshot.available -> LSPosedMethodOutcome.CLEAN
+                    else -> LSPosedMethodOutcome.SUPPORT
+                },
+                detail = "Cross-validates process existence in kernel process table against /sys/fs/cgroup hierarchy and Inode metadata to detect framework hiding traces.",
             ),
             LSPosedMethodResult(
                 label = "Signal summary",
@@ -392,7 +408,11 @@ class LSPosedRepository(
         return LSPosedSignal(
             id = "native_${trace.group.lowercase()}_$index",
             label = trace.label,
-            value = if (trace.group == "HEAP") "Residual" else "Mapped",
+            value = when (trace.group) {
+                "HEAP" -> "Residual"
+                "CGROUP" -> "Trace anomaly"
+                else -> "Mapped"
+            },
             group = LSPosedSignalGroup.NATIVE,
             severity = when (trace.severity) {
                 "DANGER" -> LSPosedSignalSeverity.DANGER

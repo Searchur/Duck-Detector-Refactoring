@@ -91,6 +91,8 @@ data class LSPosedReport(
     val nativeMapsHitCount: Int,
     val nativeHeapHitCount: Int,
     val nativeHeapScannedRegions: Int,
+    val nativeCgroupHitCount: Int = 0,
+    val nativeCgroupScannedPids: Int = 0,
     val errorMessage: String? = null,
 ) {
     val dangerSignalCount: Int

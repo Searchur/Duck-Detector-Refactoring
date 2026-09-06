@@ -19,6 +19,7 @@
 #include <set>
 #include <string>
 
+#include "lsposed/probes/cgroup_anomaly_probe.h"
 #include "lsposed/probes/heap_probe.h"
 #include "lsposed/probes/maps_probe.h"
 
@@ -47,16 +48,20 @@ namespace duckdetector::lsposed {
 
         const ProbeResult maps_probe = scan_runtime_maps();
         const ProbeResult heap_probe = scan_heap_residuals();
+        const ProbeResult cgroup_probe = scan_cgroup_anomalies();
 
         snapshot.heap_available = heap_probe.available;
         snapshot.maps_hit_count = maps_probe.hit_count;
         snapshot.maps_scanned_lines = maps_probe.scanned_count;
         snapshot.heap_hit_count = heap_probe.hit_count;
         snapshot.heap_scanned_regions = heap_probe.scanned_count;
+        snapshot.cgroup_hit_count = cgroup_probe.hit_count;
+        snapshot.cgroup_scanned_pids = cgroup_probe.scanned_count;
 
         std::set<std::string> dedupe;
         append_probe(snapshot, maps_probe, dedupe);
         append_probe(snapshot, heap_probe, dedupe);
+        append_probe(snapshot, cgroup_probe, dedupe);
         return snapshot;
     }
 

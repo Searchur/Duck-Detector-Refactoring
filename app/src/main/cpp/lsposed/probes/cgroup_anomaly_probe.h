@@ -14,23 +14,16 @@
  * limitations under the License.
  */
 
-package com.eltavine.duckdetector.features.lsposed.data.native
+#ifndef DUCKDETECTOR_LSPOSED_PROBES_CGROUP_ANOMALY_PROBE_H
+#define DUCKDETECTOR_LSPOSED_PROBES_CGROUP_ANOMALY_PROBE_H
 
-data class LSPosedNativeTrace(
-    val group: String,
-    val severity: String,
-    val label: String,
-    val detail: String,
-)
+#include "lsposed/common/types.h"
 
-data class LSPosedNativeSnapshot(
-    val available: Boolean = false,
-    val heapAvailable: Boolean = false,
-    val mapsHitCount: Int = 0,
-    val mapsScannedLines: Int = 0,
-    val heapHitCount: Int = 0,
-    val heapScannedRegions: Int = 0,
-    val cgroupHitCount: Int = 0,
-    val cgroupScannedPids: Int = 0,
-    val traces: List<LSPosedNativeTrace> = emptyList(),
-)
+namespace duckdetector::lsposed {
+
+    ProbeResult scan_cgroup_anomalies();
+
+}  // namespace duckdetector::lsposed
+
+#endif  // DUCKDETECTOR_LSPOSED_PROBES_CGROUP_ANOMALY_PROBE_H
+

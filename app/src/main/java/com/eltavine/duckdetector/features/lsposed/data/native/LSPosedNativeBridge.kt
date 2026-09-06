@@ -71,6 +71,8 @@ class LSPosedNativeBridge {
             "MAPS_SCANNED" -> copy(mapsScannedLines = value.toIntOrNull() ?: mapsScannedLines)
             "HEAP_HITS" -> copy(heapHitCount = value.toIntOrNull() ?: heapHitCount)
             "HEAP_SCANNED" -> copy(heapScannedRegions = value.toIntOrNull() ?: heapScannedRegions)
+            "CGROUP_HITS" -> copy(cgroupHitCount = value.toIntOrNull() ?: cgroupHitCount)
+            "CGROUP_SCANNED" -> copy(cgroupScannedPids = value.toIntOrNull() ?: cgroupScannedPids)
             else -> this
         }
     }

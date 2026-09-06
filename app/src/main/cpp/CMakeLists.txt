@@ -116,6 +116,7 @@ set(LSPOSED_SOURCES
     lsposed/common/codec.cpp
     lsposed/probes/maps_probe.cpp
     lsposed/probes/heap_probe.cpp
+    lsposed/probes/cgroup_anomaly_probe.cpp
     lsposed/snapshot_builder.cpp
     lsposed/native_bridge.cpp
 )

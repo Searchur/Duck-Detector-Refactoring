@@ -153,4 +153,50 @@ class LSPosedCardModelMapperTest {
         assertEquals(DetectionSeverity.DANGER, model.status.severity)
         assertEquals("1 high-risk LSPosed signal(s)", model.verdict)
     }
+
+    @Test
+    fun `cgroup anomaly signal surfaces in native section, methods, and scan rows`() {
+        val report = LSPosedReport.loading().copy(
+            stage = LSPosedStage.READY,
+            packageVisibility = LSPosedPackageVisibility.FULL,
+            nativeAvailable = true,
+            nativeCgroupHitCount = 1,
+            nativeCgroupScannedPids = 1400,
+            signals = listOf(
+                LSPosedSignal(
+                    id = "native_cgroup_0",
+                    label = "Framework trace hiding (cgroup anomaly)",
+                    value = "Trace anomaly",
+                    group = LSPosedSignalGroup.NATIVE,
+                    severity = LSPosedSignalSeverity.DANGER,
+                    detail = "CGROUP\ntotal_scanned=1400 abnormal_count=1 max_score=5 reason_mask=0x23",
+                    detailMonospace = true,
+                ),
+            ),
+            methods = listOf(
+                LSPosedMethodResult(
+                    label = "Cgroup trace anomaly",
+                    summary = "1 anomaly(ies)",
+                    outcome = LSPosedMethodOutcome.DETECTED,
+                    detail = "Cross-validates process existence in kernel process table against /sys/fs/cgroup hierarchy.",
+                ),
+            ),
+        )
+
+        val model = mapper.map(report)
+
+        assertEquals(DetectionSeverity.DANGER, model.status.severity)
+        assertTrue(model.verdict.contains("high-risk LSPosed signal", ignoreCase = true))
+        assertTrue(
+            model.nativeRows.any {
+                it.label == "Framework trace hiding (cgroup anomaly)" && it.value == "Trace anomaly"
+            },
+        )
+        assertTrue(
+            model.methodRows.any {
+                it.label == "Cgroup trace anomaly" && it.value == "1 anomaly(ies)"
+            },
+        )
+        assertEquals("1", model.scanRows.single { it.label == "Cgroup anomalies" }.value)
+    }
 }
