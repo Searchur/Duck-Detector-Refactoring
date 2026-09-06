@@ -267,9 +267,9 @@ class NativeRootRepository(
                     else -> NativeRootMethodOutcome.CLEAN
                 },
                 detail = buildString {
-                    append("Checks SELinux MAC and sandbox permission boundaries (Netlink RTM_GETLINK, /data_mirror).")
-                    append("\nUnder AOSP sepolicy, untrusted_app is strictly forbidden from querying RTM_GETLINK dump or physical MAC addresses on API 30+.")
-                    append("\nIf RTM_GETLINK queries succeed without EACCES, physical MAC is exposed (Magisk sepolicy breach), or /data_mirror exists, it indicates a permission boundary breach.")
+                    append("Checks SELinux MAC and sandbox permission boundaries (Netlink RTM_GETLINK, RTM_GETNEIGH, /data_mirror).")
+                    append("\nUnder AOSP sepolicy, untrusted_app is strictly forbidden from querying physical hardware MAC or ARP neighbor tables on API 30+.")
+                    append("\nIf physical Wi-Fi/Ethernet MAC is exposed, or valid unicast LAN ARP entries are leaked (Magisk sepolicy breach or policy corruption), or /data_mirror exists, it indicates a permission boundary breach.")
                     append("\nTest Result:\n")
                     append(snapshot.permissionBoundaryDetail)
                 },

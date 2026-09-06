@@ -153,4 +153,30 @@ class NativeRootNativeBridgeTest {
         assertTrue(finding.detail.contains("Magisk sepolicy injection"))
     }
 
+    @Test
+    fun `parse preserves netlink neighbor table leak finding and details`() {
+        val snapshot = bridge.parse(
+            """
+                AVAILABLE=1
+                MAGISK=1
+                PERMISSION_BOUNDARY_FOUND=1
+                PERMISSION_BOUNDARY_AVAILABLE=1
+                PERMISSION_BOUNDARY_DETAIL=Netlink neigh boundary: neighbor table leak detected (192.168.1.1 12:34:56:78:9a:bc) (SELinux bypass detected).\nMount boundary: /data_mirror directory is accessible.
+                FINDING=PERMISSION_BOUNDARY	DANGER	AF_NETLINK Neighbor Leak	Hardware ARP/Neighbor Exposed	SELinux permission boundary breach: ARP/neighbor entry leaked (192.168.1.1 -> 12:34:56:78:9a:bc) on API 36 (AOSP netlink_route_socket getneigh restriction bypassed).
+            """.trimIndent(),
+        )
+
+        assertTrue(snapshot.available)
+        assertTrue(snapshot.magiskDetected)
+        assertTrue(snapshot.permissionBoundaryDetected)
+        assertTrue(snapshot.permissionBoundaryAvailable)
+        assertTrue(snapshot.permissionBoundaryDetail.contains("neighbor table leak detected"))
+        assertEquals(1, snapshot.findings.size)
+        val finding = snapshot.findings.first()
+        assertEquals("PERMISSION_BOUNDARY", finding.group)
+        assertEquals("AF_NETLINK Neighbor Leak", finding.label)
+        assertEquals("Hardware ARP/Neighbor Exposed", finding.value)
+        assertTrue(finding.detail.contains("getneigh restriction bypassed"))
+    }
+
 }
