@@ -95,7 +95,7 @@ class LSPosedCardModelMapper {
 
             LSPosedStage.READY -> when {
                 report.hasDangerSignals ->
-                    "Binder bridge replies, loaded Xposed classes, XposedBridge fields, callback handlers, runtime artifacts, logcat leaks, zygote permission GID mismatches, dirty SELinux policy rules, stack trace signatures, or native LSPosed keywords point to active hook-framework presence rather than passive install residue."
+                    "Binder bridge replies, loaded Xposed classes, XposedBridge fields, callback handlers, runtime artifacts, logcat leaks, zygote permission GID mismatches, dirty SELinux policy rules, stack trace signatures, native LSPosed keywords, or cgroup hiding anomalies point to active hook-framework presence rather than passive install residue."
 
                 report.hasWarningSignals ->
                     "Installed managers, deep ClassLoader chains, environment residue, dirty SELinux policy drift, or pattern-only logcat traces were found, but the current process did not expose enough stronger runtime evidence to treat the framework as confirmed active here."
@@ -104,7 +104,7 @@ class LSPosedCardModelMapper {
                     "No LSPosed/Xposed signal surfaced from the available probes, but at least one runtime, package, logcat, or native evidence path was unavailable."
 
                 else ->
-                    "No Xposed class loading, ClassLoader, callback, Binder bridge, runtime artifact, logcat, stack, maps, or heap traces surfaced in the current app process."
+                    "No Xposed class loading, ClassLoader, callback, Binder bridge, runtime artifact, logcat, stack, maps, heap, or cgroup traces surfaced in the current app process."
             }
         }
     }
@@ -347,6 +347,7 @@ class LSPosedCardModelMapper {
                     "Module apps",
                     "Native maps",
                     "Native heap",
+                    "Cgroup anomalies",
                     "Package visibility",
                 ),
                 DetectorStatus.info(InfoKind.ERROR),
@@ -506,6 +507,19 @@ class LSPosedCardModelMapper {
                     status = when {
                         report.nativeHeapHitCount > 0 -> DetectorStatus.danger()
                         report.nativeHeapAvailable -> DetectorStatus.allClear()
+                        else -> DetectorStatus.info(InfoKind.SUPPORT)
+                    },
+                ),
+                LSPosedDetailRowModel(
+                    label = "Cgroup anomalies",
+                    value = if (report.nativeAvailable || report.nativeCgroupHitCount > 0) {
+                        report.nativeCgroupHitCount.toString()
+                    } else {
+                        "N/A"
+                    },
+                    status = when {
+                        report.nativeCgroupHitCount > 0 -> DetectorStatus.danger()
+                        report.nativeAvailable -> DetectorStatus.allClear()
                         else -> DetectorStatus.info(InfoKind.SUPPORT)
                     },
                 ),

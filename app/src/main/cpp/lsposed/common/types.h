@@ -48,6 +48,8 @@ namespace duckdetector::lsposed {
         int maps_scanned_lines = 0;
         int heap_hit_count = 0;
         int heap_scanned_regions = 0;
+        int cgroup_hit_count = 0;
+        int cgroup_scanned_pids = 0;
         std::vector<NativeTrace> traces;
     };
 

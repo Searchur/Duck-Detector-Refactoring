@@ -35,8 +35,11 @@ class LSPosedNativeBridgeTest {
                 MAPS_SCANNED=412
                 HEAP_HITS=1
                 HEAP_SCANNED=4
+                CGROUP_HITS=1
+                CGROUP_SCANNED=1400
                 TRACE=MAPS	DANGER	LSPosed runtime mapping	/system/framework/lsposed.dex
                 TRACE=HEAP	DANGER	Heap residual	MAPS\nKeyword sample matched in dalvik-main space
+                TRACE=CGROUP	DANGER	Framework trace hiding (cgroup anomaly)	total_scanned=1400 abnormal_count=1 max_score=5 reason_mask=0x23
             """.trimIndent(),
         )
 
@@ -44,9 +47,12 @@ class LSPosedNativeBridgeTest {
         assertTrue(snapshot.heapAvailable)
         assertEquals(2, snapshot.mapsHitCount)
         assertEquals(4, snapshot.heapScannedRegions)
-        assertEquals(2, snapshot.traces.size)
-        assertEquals("HEAP", snapshot.traces.last().group)
-        assertTrue(snapshot.traces.last().detail.contains('\n'))
+        assertEquals(1, snapshot.cgroupHitCount)
+        assertEquals(1400, snapshot.cgroupScannedPids)
+        assertEquals(3, snapshot.traces.size)
+        assertEquals("CGROUP", snapshot.traces.last().group)
+        assertEquals("Framework trace hiding (cgroup anomaly)", snapshot.traces.last().label)
+        assertTrue(snapshot.traces.last().detail.contains("reason_mask=0x23"))
     }
 
     @Test

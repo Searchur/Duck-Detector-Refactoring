@@ -66,6 +66,8 @@ namespace duckdetector::lsposed {
         output << "MAPS_SCANNED=" << snapshot.maps_scanned_lines << '\n';
         output << "HEAP_HITS=" << snapshot.heap_hit_count << '\n';
         output << "HEAP_SCANNED=" << snapshot.heap_scanned_regions << '\n';
+        output << "CGROUP_HITS=" << snapshot.cgroup_hit_count << '\n';
+        output << "CGROUP_SCANNED=" << snapshot.cgroup_scanned_pids << '\n';
         for (const NativeTrace &trace: snapshot.traces) {
             output << "TRACE="
                    << trace.group << '\t'
