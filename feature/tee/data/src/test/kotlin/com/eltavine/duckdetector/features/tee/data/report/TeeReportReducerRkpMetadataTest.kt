@@ -24,6 +24,30 @@ class TeeReportReducerRkpMetadataTest {
             assertTrue(row.body.contains(status))
             assertTrue(row.body.contains("CTS status cannot be determined"))
             assertTrue(row.body.contains("RKP V3"))
+            assertTrue(row.body.contains("Fingerprint and VBMeta were not compared"))
+            assertTrue(row.body.contains("may predate a system update"))
+            assertTrue(report.exportText.contains(row.body))
+        }
+    }
+
+    @Test
+    fun `CSR style field names in certificate metadata do not establish current build consistency`() {
+        val base = TeeRkpState(provisioned = true, serverSigned = true)
+        val baseline = reducer.reduce(baseArtifacts(rkp = base))
+        for (metadata in listOf(
+            "{\"fingerprint\": \"brand/product/device:16/old/1:user/release-keys\"}",
+            "{\"vbmeta_digest\": h'FFEE'}",
+            "{1: \"brand/product/device:16/new/2:user/release-keys\", 4: h'AABB'}",
+        )) {
+            val report = reducer.reduce(baseArtifacts(rkp = base.copy(buildMetadata = metadata)))
+            val row = report.sections.flatMap { it.items }.single { it.title == "RKP build metadata" }
+
+            assertEquals(TeeSignalLevel.INFO, row.level)
+            assertEquals(baseline.verdict, report.verdict)
+            assertEquals(baseline.tamperScore, report.tamperScore)
+            assertEquals(baseline.supplementaryIndicatorCount, report.supplementaryIndicatorCount)
+            assertTrue(row.body.contains(metadata))
+            assertTrue(row.body.contains("certificate field mapping is undocumented"))
             assertTrue(report.exportText.contains(row.body))
         }
     }

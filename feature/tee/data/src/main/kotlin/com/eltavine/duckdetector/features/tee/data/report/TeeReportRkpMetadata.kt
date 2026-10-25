@@ -8,6 +8,9 @@ internal fun rkpBuildMetadataValue(rkp: TeeRkpState): String = buildString {
         rkp.buildMetadata != null -> {
             append("Provisioning key 5 (CBOR): ")
             append(rkp.buildMetadata)
+            append(" Fingerprint and VBMeta were not compared with the current build: ")
+            append("their certificate field mapping is undocumented. ")
+            append("Provisioning metadata may predate a system update.")
         }
         rkp.provisioningInfoIssue != null -> append("Unavailable: provisioning info was not fully decoded.")
         else -> append("Provisioning key 5 was not included in this certificate.")
