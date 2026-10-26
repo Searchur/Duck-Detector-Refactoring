@@ -165,13 +165,17 @@ jobs:
         with:
           cache-read-only: "true"
 
+      - name: Generate contributors JSON and avatars
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./gradlew --stacktrace -Pduckdetector.githubContributors.refresh=true :app:generateGithubContributorsAsset
+
       # Every module registers a unitTest lifecycle task, so the unqualified name runs the tests of
       # all core, capability, feature and app modules; :build-logic:test runs the module boundary
       # validator's self-tests. Configuring the build already fails on a boundary violation.
       # checkPublicApi compares the SDK contract modules' public API with their committed dumps.
       # assembleDebug covers externalNativeBuildDebug, so the CMake configuration and all four ABIs
-      # are compiled here. The contributors asset is deliberately left unrefreshed: pull requests
-      # have no reason to reach github.com during the build.
+      # are compiled here, with the contributors snapshot generated above packaged in the APK.
       - name: Run unit tests and assemble debug
         shell: bash
         run: |
