@@ -343,13 +343,13 @@ filter stack, not an implementation of the concealment countermeasures named in 
   permission while fresh package-service queries expose no package association, with successful
   caller association, caller INTERNET state and empty-permission denial controls before and after.
 - Producing subsystem: PermissionService UID permission state and ComputerEngine package visibility.
-- Mechanism: Android 15/16 select AccessCheckingService's PermissionService. Its checkUidPermission
+- Mechanism: Android 15–17 use AccessCheckingService's PermissionService. Its checkUidPermission
   obtains the installed package with getPackage(uid), whose internal lookup uses SYSTEM_UID, then
   reads permission state without the legacy caller filter. getPackagesForUid instead filters using
   the actual caller. The feature-owned IPackageManager proxy avoids both Java clients' caches and
   uses generated method signatures rather than hard-coded transaction numbers. It does not change
   process-global hidden-API exemptions or cache settings. RECEIVE_BOOT_COMPLETED, ACCESS_WIFI_STATE
-  and REORDER_TASKS lack the instant protection flag in both reviewed manifests; active platform
+  and REORDER_TASKS lack the instant protection flag in all three reviewed manifests; active platform
   definitions are checked again. PermissionService denies these permissions to instant apps.
 - References: Android [Context.checkPermission](https://developer.android.com/reference/android/content/Context)
   and [package visibility](https://developer.android.com/training/package-visibility/declaring);
@@ -362,12 +362,29 @@ filter stack, not an implementation of the concealment countermeasures named in 
   [AIDL](https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/core/java/android/content/pm/IPackageManager.aidl)
   and [client cache](https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/core/java/android/app/ApplicationPackageManager.java).
   The same path was checked at Android 16 security pin e96ce2b091188de3bf9cf6385e50a4559839d921.
+  Android 17 `android-17.0.0_r1` was checked at frameworks/base commit
+  `94b4c163b7dfe5ce3607f7bb8456f9573f7de57d`:
+  [AccessCheckingService](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/permission/java/com/android/server/permission/access/AccessCheckingService.kt)
+  registers PermissionService;
+  [PermissionManagerService](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/core/java/com/android/server/pm/permission/PermissionManagerService.java)
+  delegates UID checks to it;
+  [PermissionService.checkUidPermission / isSinglePermissionGranted](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/permission/java/com/android/server/permission/access/permission/PermissionService.kt)
+  retain the UID package lookup and instant-app exclusion.
+  [PackageManagerInternalBase.getPackage](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/core/java/com/android/server/pm/PackageManagerInternalBase.java)
+  reaches [ComputerEngine](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/core/java/com/android/server/pm/ComputerEngine.java),
+  whose getPackage(uid) still uses SYSTEM_UID while getPackagesForUid uses Binder.getCallingUid().
+  [IPackageManagerBase](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/core/java/com/android/server/pm/IPackageManagerBase.java)
+  additionally enforces cross-user/profile access for package associations; this probe stays within
+  the caller's user. The [AIDL signatures](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/core/java/android/content/pm/IPackageManager.aidl),
+  [cached public package client](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/core/java/android/app/ApplicationPackageManager.java)
+  and [non-instant permission definitions](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/core/res/AndroidManifest.xml)
+  preserve the existing adapter and permission-selection contracts.
   HMA-OSS [1fe86ce2 PmsHookTargetBase](https://github.com/frknkrc44/HMA-OSS/blob/1fe86ce2b4a6f21197e6e92d15e054d609b7d77c/zygote/src/main/java/org/frknkrc44/hma_oss/zygote/hook/PmsHookTargetBase.kt)
   skips SYSTEM_UID; [PmsHookTarget33](https://github.com/frknkrc44/HMA-OSS/blob/1fe86ce2b4a6f21197e6e92d15e054d609b7d77c/zygote/src/main/java/org/frknkrc44/hma_oss/zygote/hook/PmsHookTarget33.kt)
   hooks the caller-filtered AppsFilter entry. This is a conditional mechanism reference, not an
   observed HMA-positive result. Android 13/14 r1 still select PermissionManagerServiceImpl and do
-  not establish this same observation model; later releases remain unsupported pending review.
-- Applicability: API 35–36, ordinary caller UID, this Android user's app IDs 10000–19999, full normal
+  not establish this same observation model; API 38 and later remain unsupported pending review.
+- Applicability: API 35–37, ordinary caller UID, this Android user's app IDs 10000–19999, full normal
   package visibility and reviewed non-instant permission definitions. No target process, target
   package name or requested probe permission is required. There is a 1 s collection budget and a
   16-candidate verification bound. Synchronous Binder calls cannot be interrupted by that budget;
@@ -387,6 +404,8 @@ filter stack, not an implementation of the concealment countermeasures named in 
   package-association dependency as independent evidence. The original HH timing classifier is not
   implemented: the new permission path lacks its caller-filtered branch, and no timing ordering or
   thresholds have been measured for the old implementation.
+  Android 17 has source verification and JVM regression coverage; its runtime behavior has not yet
+  been validated on a device. The device validation below remains Android 16 coverage.
 
 ### Fresh UID association verification
 
