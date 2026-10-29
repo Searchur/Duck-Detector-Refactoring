@@ -19,6 +19,7 @@ package com.eltavine.duckdetector.capability.selinuxpolicy.data
 
 import android.content.pm.ApplicationInfo
 import android.os.Build
+import android.os.SystemClock
 import android.system.Os
 import java.lang.reflect.Method
 
@@ -41,7 +42,23 @@ public class SelinuxContextValidityPreload {
         appInfo: ApplicationInfo,
         trace: (step: String) -> Unit = {},
         beforeCollection: () -> Unit,
+    ): Unit = preload(
+        appInfo = appInfo,
+        versionCode = 0L,
+        buildRevision = "unknown",
+        trace = trace,
+        beforeCollection = beforeCollection,
+    )
+
+    /** The host build metadata must be captured with the same preload as the evidence payload. */
+    public fun preload(
+        appInfo: ApplicationInfo,
+        versionCode: Long,
+        buildRevision: String,
+        trace: (step: String) -> Unit = {},
+        beforeCollection: () -> Unit,
     ) {
+        val preloadStartedNanos = SystemClock.elapsedRealtimeNanos()
         // Kept outside the try: a finished experiment's kernel side effects outlive a later failure.
         var sidtab = SelinuxSidtabSnapshot()
         var statusAbi = SelinuxStatusAbiSnapshot()
@@ -133,7 +150,21 @@ public class SelinuxContextValidityPreload {
                 SelinuxContextValidityBridge.closeProcessLocalAvc()
             }
         }
-        SelinuxContextValidityBridge.setPreloadedRawData(payload)
+        SelinuxContextValidityBridge.setPreloadedRawData(
+            SelinuxCarrierProvenanceCodec.attach(
+                payload,
+                SelinuxCarrierProvenance(
+                    preloadPid = Os.getpid(),
+                    appUid = appInfo.uid,
+                    startedNanos = preloadStartedNanos,
+                    apkPath = appInfo.sourceDir.orEmpty(),
+                    splitPaths = appInfo.splitSourceDirs?.toList().orEmpty(),
+                    versionCode = versionCode,
+                    payloadSchemaVersion = SelinuxCarrierBuildMetadata.CURRENT_PAYLOAD_SCHEMA_VERSION,
+                    buildRevision = buildRevision.ifBlank { "unknown" },
+                ),
+            ),
+        )
     }
 
     private fun collectBaseSnapshot(

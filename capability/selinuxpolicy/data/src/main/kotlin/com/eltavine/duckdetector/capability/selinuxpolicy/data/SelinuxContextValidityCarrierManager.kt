@@ -26,11 +26,14 @@ import android.os.IBinder
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
+import com.eltavine.duckdetector.core.platform.AppZygoteCarrierLease
 import com.eltavine.duckdetector.core.platform.AppZygoteStartGate
+import com.eltavine.duckdetector.core.evidence.ScanEpoch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asExecutor
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
@@ -39,48 +42,149 @@ public open class SelinuxContextValidityCarrierManager(
     private val context: Context? = null,
     private val serviceClass: Class<out Service> = SelinuxContextValidityCarrierService::class.java,
 ) {
-
+    private val generationStore: SelinuxAppZygoteGenerationStore? by lazy {
+        context?.applicationContext?.let(::SharedPreferencesSelinuxAppZygoteGenerationStore)
+    }
     /**
-     * Collects the carrier snapshot for a scan that started at [scanStartedAt], on the
-     * [SystemClock.elapsedRealtime] clock. Another detector's collection from the same scan is
-     * reused rather than starting the carrier's app zygote a second time.
+     * One dashboard/SDK scan shares a single epoch across SELinux and LSPosed detectors.
      */
-    public open suspend fun collectSnapshot(scanStartedAt: Long): SelinuxContextValiditySnapshot {
+    public open suspend fun collectSnapshot(scan: ScanEpoch): SelinuxContextValiditySnapshot {
         val appContext = context?.applicationContext ?: return carrierFailureSnapshot(
             "SELinux carrier service unavailable.",
         )
-        trace("request scan=$scanStartedAt package=${appContext.packageName} service=${serviceClass.name}")
-        val snapshot = sharedCollection(serviceClass).collect(scanStartedAt) {
-            trace("shared collection miss scan=$scanStartedAt")
-            withTimeoutOrNull(DETECTION_TIMEOUT_MS) {
-                AppZygoteStartGate.Default.admit(
-                    scanStartedAt = scanStartedAt,
-                    refused = {
-                        trace("start gate refused scan=$scanStartedAt")
-                        failedAttempt(SKIPPED_AFTER_FAILED_START)
-                    },
-                    stoppedBeforeConnecting = CarrierAttempt::stoppedBeforeConnecting,
-                    attempt = { performRemoteSnapshotCollection(appContext) },
-                ).snapshot
-            } ?: carrierFailureSnapshot(
-                "SELinux carrier probe timed out.",
-            )
+        val store = generationStore ?: return carrierFailureSnapshot(
+            SelinuxAppZygoteRecovery.GENERATION_FENCE_UNAVAILABLE,
+        )
+        trace("request scan=${scan.id} package=${appContext.packageName} service=${serviceClass.name}")
+        val snapshot = sharedCollection(serviceClass).collect(scan) {
+            trace("shared collection miss scan=${scan.id}")
+            boundedSingleAttempt(TOTAL_TIMEOUT_MS, onTimeout = {
+                carrierFailureSnapshot("SELinux carrier probe timed out.")
+            }) {
+                val gate = AppZygoteStartGate.Default
+                // Keep the admission lock from the first bind through recovery. Otherwise another
+                // useAppZygote bind could cancel ActivityManager's delayed retirement between the
+                // stale result and the point where recovery starts waiting for child death.
+                gate.withExclusive {
+                    val first = gate.admitExclusive(
+                        scanStartedAt = scan.startedMillis,
+                        refused = {
+                            trace("start gate refused scan=${scan.id}")
+                            failedAttempt(SKIPPED_AFTER_FAILED_START)
+                        },
+                        stoppedBeforeConnecting = CarrierAttempt::stoppedBeforeConnecting,
+                        attempt = {
+                            boundedSingleAttempt(DETECTION_TIMEOUT_MS, onTimeout = {
+                                failedAttempt("SELinux carrier probe timed out.")
+                            }) { performRemoteSnapshotCollection(appContext, scan, store) }
+                        },
+                    )
+                    val recovered = SelinuxAppZygoteRecovery.recover(
+                        first = first,
+                        reason = { it.snapshot.failureReason },
+                        parentPid = CarrierAttempt::parentPid,
+                        awaitRetirement = { pid ->
+                            trace("waiting for tracked App Zygote children to die oldParentPid=$pid scan=${scan.id}")
+                            val drained = gate.awaitNoActiveLeases(CARRIER_RETIREMENT_TIMEOUT_MS)
+                            if (!drained) {
+                                trace("carrier retirement timed out oldParentPid=$pid scan=${scan.id}")
+                                false
+                            } else {
+                                // AOSP schedules App-Zygote death 5 seconds after the last child
+                                // leaves. Keep all new binds blocked for that interval plus a guard;
+                                // the replacement parent and preload timestamp are still verified.
+                                val quietWindowMs = APP_ZYGOTE_KILL_DELAY_MS + RETIREMENT_GUARD_MS
+                                trace("all tracked carrier children died oldParentPid=$pid; " +
+                                    "waiting quietWindowMs=$quietWindowMs scan=${scan.id}")
+                                delay(quietWindowMs)
+                                trace("retirement quiet window elapsed oldParentPid=$pid scan=${scan.id}")
+                                true
+                            }
+                        },
+                        retry = {
+                            trace("retirement window complete; rebinding for a new preload scan=${scan.id}")
+                            gate.admitExclusive(
+                                scanStartedAt = scan.startedMillis,
+                                refused = { failedAttempt(SKIPPED_AFTER_FAILED_START) },
+                                stoppedBeforeConnecting = CarrierAttempt::stoppedBeforeConnecting,
+                                attempt = {
+                                    boundedSingleAttempt(REBIND_TIMEOUT_MS, onTimeout = {
+                                        failedAttempt("SELinux carrier recovery binding timed out.")
+                                    }) { performRemoteSnapshotCollection(appContext, scan, store) }
+                                },
+                            )
+                        },
+                        failure = { reason -> failedAttempt(reason) },
+                    )
+                    val acceptedKey = recovered.generationKey
+                    if (acceptedKey != null && !store.commitAccepted(acceptedKey)) {
+                        trace("generation fence commit failed scan=${scan.id} " +
+                            "preloadPid=${acceptedKey.preloadPid}")
+                        carrierFailureSnapshot("App Zygote generation fence could not be persisted.")
+                            .copy(appZygoteParentPid = recovered.parentPid)
+                    } else {
+                        recovered.snapshot
+                    }
+                }
+            }
         }
-        trace("return scan=$scanStartedAt available=${snapshot.available} carrier=${snapshot.carrierContext} " +
+        trace("return scan=${scan.id} available=${snapshot.available} carrier=${snapshot.carrierContext} " +
             "avc=${snapshot.avcLookup.state} pairs=${snapshot.avcLookup.pairs} failure=${snapshot.failureReason}")
         return snapshot
     }
 
-    private suspend fun performRemoteSnapshotCollection(context: Context): CarrierAttempt {
+    private suspend fun performRemoteSnapshotCollection(
+        context: Context,
+        scan: ScanEpoch,
+        store: SelinuxAppZygoteGenerationStore,
+    ): CarrierAttempt {
+        val codeAtBind = SelinuxCarrierCodeIdentity.readExpectedCode(context, serviceClass)
         return performRemoteCall(
             context = context,
             onConnected = { proxy ->
                 trace("snapshot transaction begin")
                 val raw = proxy.collectSnapshot()
                 trace("snapshot transaction returned chars=${raw.length}")
+                val codeAfter = SelinuxCarrierCodeIdentity.readExpectedCode(context, serviceClass)
+                val origin = SelinuxCarrierProvenanceCodec.read(raw)
+                val mismatch = provenanceFailureReason(
+                    raw, codeAtBind, codeAfter, SystemClock.elapsedRealtimeNanos(),
+                )
+                val carrierParentPid = SelinuxCarrierProvenanceCodec.carrierParentPid(raw)
+                val generationKey = origin?.toGenerationKey()
+                val timestampStale = mismatch == null &&
+                    SelinuxAppZygoteRecovery.stale(origin, scan.startedNanos)
+                val fenceCheck = if (mismatch == null && !timestampStale && generationKey != null) {
+                    store.check(generationKey)
+                } else {
+                    GenerationFenceCheck.NOT_ACCEPTED
+                }
+                val freshness = when {
+                    mismatch != null -> mismatch
+                    timestampStale -> SelinuxAppZygoteRecovery.STALE_PRELOAD
+                    fenceCheck == GenerationFenceCheck.ALREADY_ACCEPTED ->
+                        SelinuxAppZygoteRecovery.GENERATION_ALREADY_CONSUMED
+                    fenceCheck == GenerationFenceCheck.UNAVAILABLE ->
+                        SelinuxAppZygoteRecovery.GENERATION_FENCE_UNAVAILABLE
+                    else -> null
+                }
+                trace("snapshot preloadPid=${origin?.preloadPid} carrierParentPid=" +
+                    "$carrierParentPid versionCode=${origin?.versionCode} " +
+                    "schema=${origin?.payloadSchemaVersion} buildRevision=${origin?.buildRevision} " +
+                    "preloadStartedNanos=${origin?.startedNanos} scanStartedNanos=${scan.startedNanos} " +
+                    "apk=${origin?.apkPath} expectedApk=${codeAfter?.apkPath} freshness=$freshness scan=${scan.id}")
+                val snapshot = (if (freshness == null) SelinuxContextValidityBridge().parse(raw)
+                else carrierFailureSnapshot(freshness)).copy(
+                    appZygoteParentPid = carrierParentPid,
+                    appZygotePreloadStartedNanos = origin?.startedNanos,
+                    appZygotePreloadVersionCode = origin?.versionCode,
+                    appZygotePreloadBuildRevision = origin?.buildRevision,
+                )
                 CarrierAttempt(
-                    snapshot = SelinuxContextValidityBridge().parse(raw),
+                    snapshot = snapshot,
                     stoppedBeforeConnecting = false,
+                    parentPid = carrierParentPid,
+                    generationKey = generationKey.takeIf { freshness == null && snapshot.available },
                 )
             },
             onNullBinder = { failedAttempt("SELinux carrier service returned a null binder.") },
@@ -94,6 +198,15 @@ public open class SelinuxContextValidityCarrierManager(
         )
     }
 
+    internal fun provenanceFailureReason(
+        raw: String,
+        codeAtBind: SelinuxCarrierExpectedCode?,
+        codeAtReply: SelinuxCarrierExpectedCode?,
+        nowNanos: Long,
+    ): String? = SelinuxCarrierCodeIdentity.provenanceFailureReason(
+        raw, codeAtBind, codeAtReply, nowNanos,
+    )
+
     private fun failedAttempt(
         reason: String,
         stoppedBeforeConnecting: Boolean = false,
@@ -105,12 +218,12 @@ public open class SelinuxContextValidityCarrierManager(
     private class CarrierAttempt(
         val snapshot: SelinuxContextValiditySnapshot,
         val stoppedBeforeConnecting: Boolean,
+        val parentPid: Int? = null,
+        val generationKey: SelinuxAppZygoteGenerationKey? = null,
     )
 
-    private fun carrierFailureSnapshot(
-        reason: String,
-    ): SelinuxContextValiditySnapshot {
-        return SelinuxContextValiditySnapshot(
+    private fun carrierFailureSnapshot(reason: String): SelinuxContextValiditySnapshot =
+        SelinuxContextValiditySnapshot(
             dirtyPolicyFailureReason = reason,
             javaDirtyPolicyFailureReason = reason,
             policyloadSeqnoState = SelinuxPolicyloadSeqnoState.UNAVAILABLE.name,
@@ -122,7 +235,6 @@ public open class SelinuxContextValidityCarrierManager(
             ),
             failureReason = reason,
         )
-    }
 
     private suspend fun <T> performRemoteCall(
         context: Context,
@@ -139,6 +251,7 @@ public open class SelinuxContextValidityCarrierManager(
         val unbindAttempted = AtomicBoolean(false)
         val completionAttempted = AtomicBoolean(false)
         val connected = AtomicBoolean(false)
+        var carrierLease: AppZygoteCarrierLease? = null
         lateinit var connection: ServiceConnection
 
         fun requestCleanup() {
@@ -148,6 +261,9 @@ public open class SelinuxContextValidityCarrierManager(
                 runCatching { context.unbindService(connection) }
                     .onSuccess { event("unbind returned") }
                     .onFailure { event("unbind failed ${it.message}") }
+                // Only a binding that never obtained a remote Binder can be retired here. For a
+                // connected child the lease remains until its Binder process actually dies.
+                carrierLease?.bindingFailed()
             }
         }
 
@@ -166,12 +282,22 @@ public open class SelinuxContextValidityCarrierManager(
             ) {
                 event("onServiceConnected component=$name binder=${service?.let { System.identityHashCode(it) }} " +
                     "alive=${service?.isBinderAlive}")
+                if (!continuation.isActive) {
+                    requestCleanup()
+                    return
+                }
                 connected.set(true)
                 if (service == null) {
+                    carrierLease?.bindingFailed()
                     finish(onNullBinder())
                     return
                 }
                 try {
+                    if (carrierLease?.attach(service) != true) {
+                        event("remote Binder died before its App-Zygote lease could be attached")
+                        finish(onError("The dedicated SELinux carrier died before its Binder could be observed."))
+                        return
+                    }
                     val proxy = SelinuxContextValidityCarrierProxy(service)
                     finish(onConnected(proxy))
                 } catch (throwable: Throwable) {
@@ -182,6 +308,7 @@ public open class SelinuxContextValidityCarrierManager(
 
             override fun onNullBinding(name: ComponentName?) {
                 event("onNullBinding component=$name")
+                carrierLease?.bindingFailed()
                 finish(onNullBinder())
             }
 
@@ -202,6 +329,11 @@ public open class SelinuxContextValidityCarrierManager(
             requestCleanup()
         }
         if (!continuation.isActive) {
+            return@suspendCancellableCoroutine
+        }
+        carrierLease = AppZygoteCarrierLease()
+        if (!continuation.isActive) {
+            carrierLease.bindingFailed()
             return@suspendCancellableCoroutine
         }
 
@@ -237,12 +369,23 @@ public open class SelinuxContextValidityCarrierManager(
     public companion object {
         private const val TRACE_TAG = "DuckSelinuxCarrier"
         private const val DETECTION_TIMEOUT_MS = 15_000L
+        private const val CARRIER_RETIREMENT_TIMEOUT_MS = 23_000L
+        private const val APP_ZYGOTE_KILL_DELAY_MS = 5_000L
+        private const val RETIREMENT_GUARD_MS = 1_000L
+        private const val REBIND_TIMEOUT_MS = 8_000L
+        private const val TOTAL_TIMEOUT_MS = DETECTION_TIMEOUT_MS + CARRIER_RETIREMENT_TIMEOUT_MS +
+            APP_ZYGOTE_KILL_DELAY_MS + RETIREMENT_GUARD_MS + REBIND_TIMEOUT_MS
         private const val SKIPPED_AFTER_FAILED_START =
             "Not started: an app zygote carrier was stopped before it connected earlier in this " +
                 "scan, and starting another would stop the app's other helper processes again."
         private val REMOTE_CALLBACK_EXECUTOR = Dispatchers.IO.asExecutor()
         private val sharedCollections =
             ConcurrentHashMap<Class<out Service>, ScanSharedCollection<SelinuxContextValiditySnapshot>>()
+        internal suspend fun <T> boundedSingleAttempt(
+            timeoutMs: Long,
+            onTimeout: () -> T,
+            attempt: suspend () -> T,
+        ): T = withTimeoutOrNull(timeoutMs) { attempt() } ?: onTimeout()
 
         private fun trace(message: String) {
             Log.i(TRACE_TAG, "pid=${Process.myPid()} tid=${Process.myTid()} uid=${Process.myUid()} $message")
@@ -251,8 +394,6 @@ public open class SelinuxContextValidityCarrierManager(
         private fun sharedCollection(
             serviceClass: Class<out Service>,
         ): ScanSharedCollection<SelinuxContextValiditySnapshot> =
-            sharedCollections.computeIfAbsent(serviceClass) {
-                ScanSharedCollection(clock = SystemClock::elapsedRealtime)
-            }
+            sharedCollections.computeIfAbsent(serviceClass) { ScanSharedCollection() }
     }
 }
